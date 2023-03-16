@@ -1,7 +1,7 @@
 # RP2040 NTP Server
 ------------------
 
-** This is in-development code, not a finished tool **
+**This is in-development code, not a finished tool**
 
 
 An NTP Server based on code from https://github.com/liebman/ESPNTPServer designed to work with an rp2040, via TinyUSB USB network device.
@@ -17,3 +17,14 @@ Intended to be (potentially) usable with:
  * ATSC? provided clock (don't know if this is accurate enough or feasibly captured)
  * P25 provided clock (same as above)
  * WWV by phone service?
+
+
+## Building:
+```
+mkdir build
+cd build
+cmake ..
+make -j 8
+```
+Then copy the generated uf2 file to the pico.
+
