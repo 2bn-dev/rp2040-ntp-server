@@ -1,0 +1,9 @@
+[submodule "lib/lwip"]
+	path = lib/lwip
+	url = https://github.com/lwip-tcpip/lwip.git
+[submodule "lib/tinyusb"]
+	path = lib/tinyusb
+	url = https://github.com/hathach/tinyusb.git
+[submodule "lib/es100"]
+	path = lib/es100
+	url = git@github.com:2bn-dev/es100.git
