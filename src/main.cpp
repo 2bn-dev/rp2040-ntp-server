@@ -1,12 +1,11 @@
 
 
 #include "lwipopts.h"
-#include "main.h"
 
 #include "bsp/board.h"
 #include "tusb.h"
 
-
+#include "net.h"
 //#include "gps.h"
 //#include "ntp.h"
 

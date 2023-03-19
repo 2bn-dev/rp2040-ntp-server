@@ -124,8 +124,9 @@ void init_lwip(void)
   netif->hwaddr_len = sizeof(tud_network_mac_address);
   memcpy(netif->hwaddr, tud_network_mac_address, sizeof(tud_network_mac_address));
   netif->hwaddr[5] ^= 0x01;
-
-  netif = netif_add(netif, &ipaddr, &netmask, &gateway, NULL, netif_init_cb, ip_input);
+  
+  
+  netif = netif_add(netif, &ipaddr, &netmask, &gateway, NULL, netif_init_cb, netif_input);
 #if LWIP_IPV6
   netif_create_ip6_linklocal_address(netif, 1);
 #endif
@@ -169,7 +170,7 @@ void service_traffic(void)
   /* handle any packet received by tud_network_recv_cb() */
   if (received_frame)
   {
-    etharp_input(received_frame, &netif_data);
+    netif_data.input(received_frame, &netif_data);
     pbuf_free(received_frame);
     received_frame = NULL;
     tud_network_recv_renew();
@@ -187,21 +188,3 @@ void tud_network_init_cb(void)
     received_frame = NULL;
   }
 }
-
-/*
-sys_prot_t sys_arch_protect(void)
-{
-  return 0;
-}
-void sys_arch_unprotect(sys_prot_t pval)
-{
-  (void)pval;
-}
-*/
-// lwip needs a millisecond time source, and the TinyUSB board support code has one available */
-/*
-uint32_t sys_now(void)
-{
-  return board_millis();
-}
-*/
