@@ -21,11 +21,10 @@
 
 #include <functional>
 #include <lwip/def.h> // htonl() & ntohl()
+#include "net.h"
+#include "ntp.h"
 
-#include "NTP.h"
-
-#include "Log.h"
-static const char* TAG = "NTP";
+static const char* TAG = "ntp";
 
 //#define NTP_PACKET_DEBUG
 
@@ -87,21 +86,21 @@ char* timestr(long int t)
 
 void dumpNTPPacket(NTPPacket* ntp)
 {
-    dbprintf("size:       %u\n", sizeof(*ntp));
-    dbprintf("firstbyte:  0x%02x\n", *(uint8_t*)ntp);
-    dbprintf("li:         %u\n", getLI(ntp->flags));
-    dbprintf("version:    %u\n", getVERS(ntp->flags));
-    dbprintf("mode:       %u\n", getMODE(ntp->flags));
-    dbprintf("stratum:    %u\n", ntp->stratum);
-    dbprintf("poll:       %u\n", ntp->poll);
-    dbprintf("precision:  %d\n", ntp->precision);
-    dbprintf("delay:      %u\n", ntp->delay);
-    dbprintf("dispersion: %u\n", ntp->dispersion);
-    dbprintf("ref_id:     %02x:%02x:%02x:%02x\n", ntp->ref_id[0], ntp->ref_id[1], ntp->ref_id[2], ntp->ref_id[3]);
-    dbprintf("ref_time:   %08x:%08x\n", ntp->ref_time.seconds, ntp->ref_time.fraction);
-    dbprintf("orig_time:  %08x:%08x\n", ntp->orig_time.seconds, ntp->orig_time.fraction);
-    dbprintf("recv_time:  %08x:%08x\n", ntp->recv_time.seconds, ntp->recv_time.fraction);
-    dbprintf("xmit_time:  %08x:%08x\n", ntp->xmit_time.seconds, ntp->xmit_time.fraction);
+    printf("size:       %u\n", sizeof(*ntp));
+    printf("firstbyte:  0x%02x\n", *(uint8_t*)ntp);
+    printf("li:         %u\n", getLI(ntp->flags));
+    printf("version:    %u\n", getVERS(ntp->flags));
+    printf("mode:       %u\n", getMODE(ntp->flags));
+    printf("stratum:    %u\n", ntp->stratum);
+    printf("poll:       %u\n", ntp->poll);
+    printf("precision:  %d\n", ntp->precision);
+    printf("delay:      %u\n", ntp->delay);
+    printf("dispersion: %u\n", ntp->dispersion);
+    printf("ref_id:     %02x:%02x:%02x:%02x\n", ntp->ref_id[0], ntp->ref_id[1], ntp->ref_id[2], ntp->ref_id[3]);
+    printf("ref_time:   %08x:%08x\n", ntp->ref_time.seconds, ntp->ref_time.fraction);
+    printf("orig_time:  %08x:%08x\n", ntp->orig_time.seconds, ntp->orig_time.fraction);
+    printf("recv_time:  %08x:%08x\n", ntp->recv_time.seconds, ntp->recv_time.fraction);
+    printf("xmit_time:  %08x:%08x\n", ntp->xmit_time.seconds, ntp->xmit_time.fraction);
 }
 #else
 #define dumpNTPPacket(x)
@@ -123,31 +122,21 @@ NTP::~NTP()
 void NTP::begin()
 {
     _precision = computePrecision();
-    while (!_udp.listen(NTP_PORT))
-    {
-        dlog.error(TAG, F("failed to listen on port %d!  Will retry in a bit..."), NTP_PORT);
-        delay(1000);
-        dlog.warning(TAG, F("setup: retrying!"));
-    }
-
-    using namespace std::placeholders;  // for _1, _2, _3...
-
-    _udp.onPacket(std::bind( &NTP::ntp, this, _1));
 }
 
 int8_t NTP::computePrecision()
 {
     NTPTime t;
-    unsigned long start = micros();
+    uint64_t start = time_us_64();
     for (int i = 0; i < PRECISION_COUNT; ++i)
     {
         getNTPTime(&t);
     }
-    unsigned long end   = micros();
+    uint64_t      end   = time_us_64();
     double        total = (double)(end - start) / 1000000.0;
     double        time  = total / PRECISION_COUNT;
     double        prec  = log2(time);
-    dlog.info(TAG, F("computePrecision: total:%f time:%f prec:%f (%d)"), total, time, prec, (int8_t)prec);
+    //dlog.info(TAG, F("computePrecision: total:%f time:%f prec:%f (%d)"), total, time, prec, (int8_t)prec);
     return (int8_t)prec;
 }
 
@@ -161,7 +150,7 @@ void NTP::getNTPTime(NTPTime *time)
     time->fraction = (uint32_t)(percent * (double)4294967296L);
 }
 
-void NTP::ntp(AsyncUDPPacket& aup)
+void NTP::process(netconn *conn, netbuf *buf)
 {
     ++_req_count;
     NTPPacket ntp;
@@ -169,13 +158,13 @@ void NTP::ntp(AsyncUDPPacket& aup)
     getNTPTime(&recv_time);
     if (aup.length() != sizeof(NTPPacket))
     {
-        dlog.warning(TAG, F("recievePacket: ignoring packet with bad length: %d < %d"), aup.length(), sizeof(NTPPacket));
+        //dlog.warning(TAG, F("recievePacket: ignoring packet with bad length: %d < %d"), aup.length(), sizeof(NTPPacket));
         return;
     }
 
     if (!_gps.isValid())
     {
-        dlog.warning(TAG, F("recievePacket: GPS data not valid!"));
+        //dlog.warning(TAG, F("recievePacket: GPS data not valid!"));
         return;
     }
 

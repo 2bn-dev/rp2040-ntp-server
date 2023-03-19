@@ -7,3 +7,6 @@
 [submodule "lib/es100"]
 	path = lib/es100
 	url = git@github.com:2bn-dev/es100.git
+[submodule "lib/minmea"]
+	path = lib/minmea
+	url = https://github.com/kosma/minmea.git

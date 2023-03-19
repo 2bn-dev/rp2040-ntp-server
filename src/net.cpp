@@ -43,37 +43,28 @@ The smartphone may be artificially picky about which Ethernet MAC address to rec
 try changing the first byte of tud_network_mac_address[] below from 0x02 to 0x00 (clearing bit 1).
 */
 
-#include "bsp/board.h"
-#include "tusb.h"
+#include "net.h"
 
-//#include "dhserver.h"
-//#include "dnserver.h"
-#include "lwip/init.h"
-#include "lwip/timeouts.h"
-#include "lwip/ethip6.h"
-#include "lwip/dhcp.h"
-#include "dhcp.h"
-#include "httpd.h"
+// lwip context
+struct netif netif_data;
 
-#define INIT_IP4(a,b,c,d) { PP_HTONL(LWIP_MAKEU32(a,b,c,d)) }
+// shared between tud_network_recv_cb() and service_traffic()
+struct pbuf *received_frame;
 
-/* lwip context */
-static struct netif netif_data;
-
-/* shared between tud_network_recv_cb() and service_traffic() */
-static struct pbuf *received_frame;
-
-/* this is used by this code, ./class/net/net_driver.c, and usb_descriptors.c */
-/* ideally speaking, this should be generated from the hardware's unique ID (if available) */
-/* it is suggested that the first byte is 0x02 to indicate a link-local address */
+// this is used by this code, ./class/net/net_driver.c, and usb_descriptors.c
+// ideally speaking, this should be generated from the hardware's unique ID (if available)
+// it is suggested that the first byte is 0x02 to indicate a link-local address 
 const uint8_t tud_network_mac_address[6] = {0x02,0x02,0x84,0x6A,0x96,0x00};
 
-/* network parameters of this MCU */
-static const ip4_addr_t ipaddr  = INIT_IP4(192, 168, 7, 1);
-static const ip4_addr_t netmask = INIT_IP4(255, 255, 255, 0);
-static const ip4_addr_t gateway = INIT_IP4(0, 0, 0, 0);
+// network parameters of this MCU 
+// --  should be overridden by DHCP  -- 
+const ip4_addr_t ipaddr  = INIT_IP4(192, 168, 7, 1);
+const ip4_addr_t netmask = INIT_IP4(255, 255, 255, 0);
+const ip4_addr_t gateway = INIT_IP4(0, 0, 0, 0);
 
-static err_t linkoutput_fn(struct netif *netif, struct pbuf *p)
+
+
+err_t linkoutput_fn(struct netif *netif, struct pbuf *p)
 {
   (void)netif;
 
@@ -95,19 +86,19 @@ static err_t linkoutput_fn(struct netif *netif, struct pbuf *p)
   }
 }
 
-static err_t ip4_output_fn(struct netif *netif, struct pbuf *p, const ip4_addr_t *addr)
+err_t ip4_output_fn(struct netif *netif, struct pbuf *p, const ip4_addr_t *addr)
 {
   return etharp_output(netif, p, addr);
 }
 
 #if LWIP_IPV6
-static err_t ip6_output_fn(struct netif *netif, struct pbuf *p, const ip6_addr_t *addr)
+err_t ip6_output_fn(struct netif *netif, struct pbuf *p, const ip6_addr_t *addr)
 {
   return ethip6_output(netif, p, addr);
 }
 #endif
 
-static err_t netif_init_cb(struct netif *netif)
+err_t netif_init_cb(struct netif *netif)
 {
   LWIP_ASSERT("netif != NULL", (netif != NULL));
   netif->mtu = CFG_TUD_NET_MTU;
@@ -123,7 +114,7 @@ static err_t netif_init_cb(struct netif *netif)
   return ERR_OK;
 }
 
-static void init_lwip(void)
+void init_lwip(void)
 {
   struct netif *netif = &netif_data;
 
@@ -139,17 +130,6 @@ static void init_lwip(void)
   netif_create_ip6_linklocal_address(netif, 1);
 #endif
   netif_set_default(netif);
-}
-
-/* handle any DNS requests from dns-server */
-bool dns_query_proc(const char *name, ip4_addr_t *addr)
-{
-  if (0 == strcmp(name, "tiny.usb"))
-  {
-    *addr = ipaddr;
-    return true;
-  }
-  return false;
 }
 
 bool tud_network_recv_cb(const uint8_t *src, uint16_t size)
@@ -184,12 +164,12 @@ uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg)
   return pbuf_copy_partial(p, dst, p->tot_len, 0);
 }
 
-static void service_traffic(void)
+void service_traffic(void)
 {
   /* handle any packet received by tud_network_recv_cb() */
   if (received_frame)
   {
-    ethernet_input(received_frame, &netif_data);
+    etharp_input(received_frame, &netif_data);
     pbuf_free(received_frame);
     received_frame = NULL;
     tud_network_recv_renew();
@@ -208,33 +188,7 @@ void tud_network_init_cb(void)
   }
 }
 
-int main(void)
-{
-  /* initialize TinyUSB */
-  board_init();
-
-  // init device stack on configured roothub port
-  tud_init(BOARD_TUD_RHPORT);
-
-  /* initialize lwip, dhcp-server, dns-server, and http */
-  init_lwip();
-  while (!netif_is_up(&netif_data));
-
-  dhcp_start(&netif_data);
-  //while (dhserv_init(&dhcp_config) != ERR_OK);
-  //while (dnserv_init(IP_ADDR_ANY, 53, dns_query_proc) != ERR_OK);
-  httpd_init();
-
-  while (1)
-  {
-    tud_task();
-    service_traffic();
-  }
-
-  return 0;
-}
-
-/* lwip has provision for using a mutex, when applicable */
+/*
 sys_prot_t sys_arch_protect(void)
 {
   return 0;
@@ -243,9 +197,11 @@ void sys_arch_unprotect(sys_prot_t pval)
 {
   (void)pval;
 }
-
-/* lwip needs a millisecond time source, and the TinyUSB board support code has one available */
+*/
+// lwip needs a millisecond time source, and the TinyUSB board support code has one available */
+/*
 uint32_t sys_now(void)
 {
   return board_millis();
 }
+*/

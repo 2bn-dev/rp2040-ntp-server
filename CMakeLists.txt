@@ -6,9 +6,14 @@ project(rp2040-ntp-server)
 pico_sdk_init()
 
 add_executable(rp2040-ntp-server
-    ${CMAKE_CURRENT_LIST_DIR}/src/main.c
+    
+    ${CMAKE_CURRENT_LIST_DIR}/src/main.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/usb_descriptors.c
-    ${CMAKE_CURRENT_LIST_DIR}/lib/lwip/src/core/ipv4/dhcp.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/net.cpp
+    #${CMAKE_CURRENT_LIST_DIR}/src/ntp.cpp
+    #${CMAKE_CURRENT_LIST_DIR}/src/gps.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/arch/sys_arch.c
+
 )
 
 target_include_directories(rp2040-ntp-server PUBLIC 
@@ -19,9 +24,11 @@ target_include_directories(rp2040-ntp-server PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/lib/lwip/src/include/lwip/apps/
     ${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb/src/
     ${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb/lib/networking/
+    ${CMAKE_CURRENT_LIST_DIR}/lib/minmea/
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/lib/es100/CMakeLists.txt)
+#include(${CMAKE_CURRENT_LIST_DIR}/lib/libnmea/CMakeLists.txt)
 
 
 target_sources(rp2040-ntp-server PUBLIC
@@ -59,6 +66,7 @@ target_sources(rp2040-ntp-server PUBLIC
             ${CMAKE_CURRENT_LIST_DIR}/lib/lwip/src/apps/http/httpd.c
             ${CMAKE_CURRENT_LIST_DIR}/lib/lwip/src/apps/http/fs.c
             ${CMAKE_CURRENT_LIST_DIR}/lib/tinyusb/lib/networking/rndis_reports.c
+            ${CMAKE_CURRENT_LIST_DIR}/lib/minmea/minmea.c
     )
 
 

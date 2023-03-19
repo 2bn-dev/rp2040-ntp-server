@@ -22,9 +22,7 @@
 #ifndef NTP_H_
 #define NTP_H_
 
-#include "Arduino.h"
-#include "ESPAsyncUDP.h"
-#include "GPS.h"
+#include "gps.h"
 
 typedef struct ntp_time
 {
@@ -45,14 +43,14 @@ public:
 
 private:
     GPS&     _gps;
-    AsyncUDP _udp;
+    //AsyncUDP _udp;
     uint32_t _req_count;
     uint32_t _rsp_count;
     uint8_t  _precision;
 
     void getNTPTime(NTPTime *time);
     int8_t computePrecision();
-    void ntp(AsyncUDPPacket& aup);
+    //void ntp(AsyncUDPPacket& aup);
 };
 
 #endif /* NTP_H_ */
