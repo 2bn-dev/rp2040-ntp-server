@@ -97,6 +97,12 @@
 #define CFG_TUD_ECM_RNDIS     1
 #define CFG_TUD_NCM           (1-CFG_TUD_ECM_RNDIS)
 
+#define CFG_TUD_CDC             1
+#define CFG_TUD_CDC_RX_BUFSIZE  512
+#define CFG_TUD_CDC_TX_BUFSIZE  512
+#define CFG_TUD_CDC_FLUSH_ON_SOF 1
+
+
 #ifdef __cplusplus
  }
 #endif
