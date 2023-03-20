@@ -44,12 +44,13 @@ try changing the first byte of tud_network_mac_address[] below from 0x02 to 0x00
 */
 
 #include "net.h"
+#include "netif/etharp.h"
 
 // lwip context
 struct netif netif_data;
 
 // shared between tud_network_recv_cb() and service_traffic()
-struct pbuf *received_frame;
+struct pbuf *received_frame = NULL;
 
 // this is used by this code, ./class/net/net_driver.c, and usb_descriptors.c
 // ideally speaking, this should be generated from the hardware's unique ID (if available)
@@ -58,9 +59,9 @@ const uint8_t tud_network_mac_address[6] = {0x02,0x02,0x84,0x6A,0x96,0x00};
 
 // network parameters of this MCU 
 // --  should be overridden by DHCP  -- 
-const ip4_addr_t ipaddr  = INIT_IP4(192, 168, 7, 1);
-const ip4_addr_t netmask = INIT_IP4(255, 255, 255, 0);
-const ip4_addr_t gateway = INIT_IP4(0, 0, 0, 0);
+//ip4_addr_t ipaddr  = INIT_IP4(192, 168, 7, 1);
+//ip4_addr_t netmask = INIT_IP4(255, 255, 255, 0);
+//ip4_addr_t gateway = INIT_IP4(0, 0, 0, 0);
 
 
 
@@ -88,6 +89,7 @@ err_t linkoutput_fn(struct netif *netif, struct pbuf *p)
 
 err_t ip4_output_fn(struct netif *netif, struct pbuf *p, const ip4_addr_t *addr)
 {
+  //printf("ip4_output\n");
   return etharp_output(netif, p, addr);
 }
 
@@ -111,6 +113,7 @@ err_t netif_init_cb(struct netif *netif)
 #if LWIP_IPV6
   netif->output_ip6 = ip6_output_fn;
 #endif
+  printf("netif_init_cb()\n");
   return ERR_OK;
 }
 
@@ -118,15 +121,15 @@ void init_lwip(void)
 {
   struct netif *netif = &netif_data;
 
-  lwip_init();
+  //lwip_init();
 
-  /* the lwip virtual MAC address must be different from the host's; to ensure this, we toggle the LSbit */
+  // the lwip virtual MAC address must be different from the host's; to ensure this, we toggle the LSbit
   netif->hwaddr_len = sizeof(tud_network_mac_address);
   memcpy(netif->hwaddr, tud_network_mac_address, sizeof(tud_network_mac_address));
   netif->hwaddr[5] ^= 0x01;
   
-  
-  netif = netif_add(netif, &ipaddr, &netmask, &gateway, NULL, netif_init_cb, netif_input);
+  printf("init_lwip()\n"); 
+  netif = netif_add_noaddr(netif, NULL, netif_init_cb, netif_input);
 #if LWIP_IPV6
   netif_create_ip6_linklocal_address(netif, 1);
 #endif
@@ -135,20 +138,21 @@ void init_lwip(void)
 
 bool tud_network_recv_cb(const uint8_t *src, uint16_t size)
 {
-  /* this shouldn't happen, but if we get another packet before 
-  parsing the previous, we must signal our inability to accept it */
+  // this shouldn't happen, but if we get another packet before 
+  //  parsing the previous, we must signal our inability to accept it 
   if (received_frame) return false;
 
+  //printf("tud_network_recv_cb()");
   if (size)
   {
     struct pbuf *p = pbuf_alloc(PBUF_RAW, size, PBUF_POOL);
 
     if (p)
     {
-      /* pbuf_alloc() has already initialized struct; all we need to do is copy the data */
+      // pbuf_alloc() has already initialized struct; all we need to do is copy the data
       memcpy(p->payload, src, size);
 
-      /* store away the pointer for service_traffic() to later handle */
+      // store away the pointer for service_traffic() to later handle 
       received_frame = p;
     }
   }
@@ -159,18 +163,21 @@ bool tud_network_recv_cb(const uint8_t *src, uint16_t size)
 uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg)
 {
   struct pbuf *p = (struct pbuf *)ref;
-
-  (void)arg; /* unused for this example */
+  printf("tud_network_xmit_cb(%d) \n", p->tot_len);
+  (void)arg; //unused
 
   return pbuf_copy_partial(p, dst, p->tot_len, 0);
 }
 
 void service_traffic(void)
 {
-  /* handle any packet received by tud_network_recv_cb() */
+  // handle any packet received by tud_network_recv_cb()
   if (received_frame)
   {
-    netif_data.input(received_frame, &netif_data);
+    //printf("received_frame\n");
+    //netif_data.input(received_frame, &netif_data);
+    ethernet_input(received_frame, &netif_data);
+
     pbuf_free(received_frame);
     received_frame = NULL;
     tud_network_recv_renew();
@@ -181,7 +188,8 @@ void service_traffic(void)
 
 void tud_network_init_cb(void)
 {
-  /* if the network is re-initializing and we have a leftover packet, we must do a cleanup */
+  //printf("tud_network_init_cb()\n");
+  // if the network is re-initializing and we have a leftover packet, we must do a cleanup 
   if (received_frame)
   {
     pbuf_free(received_frame);
