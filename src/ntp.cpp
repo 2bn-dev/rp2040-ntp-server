@@ -199,7 +199,9 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
     ntp.flags      = setLI(LI_NONE) | setVERS(NTP_VERSION) | setMODE(MODE_SERVER);
     ntp.stratum    = 1;
     ntp.precision  = that->_precision;
+
     // TODO: compute actual root delay, and root dispersion
+
     ntp.delay = 1;      //(uint32)(0.000001 * 65536.0);
     ntp.dispersion = 1; //(uint32_t)(_gps.getDispersion() * 65536.0); // TODO: pre-calculate this?
     strncpy((char*)ntp.ref_id, REF_ID, sizeof(ntp.ref_id));
@@ -219,5 +221,17 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
     ntp.xmit_time.seconds  = htonl(ntp.xmit_time.seconds);
     ntp.xmit_time.fraction = htonl(ntp.xmit_time.fraction);
     //aup.write((uint8_t*)&ntp, sizeof(ntp));
+
+    struct pbuf *p_out;
+    p_out = pbuf_alloc(PBUF_TRANSPORT, sizeof(ntp), PBUF_RAM);
+    if(p_out == NULL){
+        printf("[ERROR] Failed to allocate pbuf for transmit");
+        return;
+    }
+    memcpy(p_out->payload, &ntp, sizeof(ntp));
+    udp_sendto(pcb, p_out, addr, port);
+    pbuf_free(p_out);
+    pbuf_free(p);
+    
     ++that->_rsp_count;
 }

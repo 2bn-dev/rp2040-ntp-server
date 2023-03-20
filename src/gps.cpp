@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <cstdarg>
+#include <cinttypes>
 #include <stdio.h>
 #include <stdarg.h>
 #include "gps.h"
@@ -33,7 +34,8 @@ static std::function<void()> _pps;
 static std::function<void()> _invalidate;
 static std::function<void()> _nmea_timeout;
 
-static __isr void _pps_isr()
+
+static __isr void _pps_isr(unsigned int gpio, long unsigned int mask)
 {
     if (_pps){
         _pps();
@@ -70,9 +72,13 @@ GPS::GPS() :
     _pps_pin(PIN_PPS),
     _gps_valid(false),
     _valid(false),
-    _nmea_late(true)
+    _nmea_late(false),
+    _nmea_timestamp_us(time_us_64()),
+    _pps_timestamp_us(0)
 {
     _reason[0] = '\0';
+    memset(&_buf, 0x0, sizeof(_buf));
+
 }
 
 GPS::~GPS()
@@ -101,9 +107,10 @@ void GPS::begin()
 #endif
 #ifdef FAMILY_RP2040
     gpio_set_dir(_pps_pin, false);
-    irq_set_exclusive_handler(IO_IRQ_BANK0, _pps_isr);
-    gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, true);
-    irq_set_enabled(IO_IRQ_BANK0, true); 
+    gpio_set_irq_enabled_with_callback(_pps_pin, GPIO_IRQ_EDGE_RISE, true, _pps_isr);
+    //irq_set_exclusive_handler(IO_IRQ_BANK0, _pps_isr);
+    //gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, true);
+    //irq_set_enabled(IO_IRQ_BANK0, true); 
 #endif
 }
 
@@ -114,18 +121,18 @@ void GPS::end()
     detachInterrupt(_pps_pin);
 #endif
 #ifdef FAMILY_RP2040
-    irq_remove_handler(_pps_pin, _pps_isr);
-    gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, false);
-    irq_set_enabled(IO_IRQ_BANK0, false);
+    //irq_remove_handler(_pps_pin, _pps_isr);
+    //gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, false);
+    //irq_set_enabled(IO_IRQ_BANK0, false);
 #endif
     _pps = nullptr;
 }
 
 void GPS::getTime(struct timeval* tv)
 {
-    uint32_t cur_micros  = time_us_32();
-    tv->tv_sec  = _seconds;
-    tv->tv_usec = (uint32_t)(cur_micros - _last_micros);
+    uint64_t cur_micros  = time_us_64();
+    tv->tv_sec  = mktime(&_nmea_timestamp);
+    tv->tv_usec = (uint32_t)(cur_micros - _pps_timestamp_us);
 
     //
     // if micros_delta is at or bigger than one second then
@@ -133,6 +140,7 @@ void GPS::getTime(struct timeval* tv)
     //
     if (tv->tv_usec >= 1000000 || tv->tv_usec < 0)
     {
+        printf("[WARNING] GPS::getTime() tv_usec too large/small?\n");
         tv->tv_usec = 999999;
     }
 }
@@ -141,104 +149,76 @@ double GPS::getDispersion()
 {
     return us2s(MAX(MICROS_PER_SEC-_max_micros, MICROS_PER_SEC-_min_micros));
 }
-/*
+
 void GPS::process()
 {
     if (_reason[0] != '\0')
     {
-        //dlog.warning(TAG, F("REASON: %s"), _reason);
+        printf("[WARNING] REASON: %s\n", _reason);
         _reason[0] = '\0';
     }
 
+    //memset(&_buf, 0x0, sizeof(_buf));
+
     while (uart_is_readable(_uart))
     {
-    	char c = uart_getc(_uart);
-    	//dlog.trace(TAG, F("c: %c"), c);
-        if (0)//_nmea.process(c))
-        {
-            struct timeval tv;
-            getTime(&tv);
-            //dlog.debug(TAG, F("'%s'"), _nmea.getSentence());
-
-            //const char * id = _nmea.getMessageID();
-
-            //
-            // if it was a RMC and its valid then check and maybe update the time
-            //
-            if (_nmea.getYear() > 2017 && strcmp("RMC", id) == 0)
-            {
-                struct tm tm;
-                tm.tm_year  = _nmea.getYear() - 1900;
-                tm.tm_mon   = _nmea.getMonth() - 1;
-                tm.tm_mday  = _nmea.getDay();
-                tm.tm_hour  = _nmea.getHour();
-                tm.tm_min   = _nmea.getMinute();
-                tm.tm_sec   = _nmea.getSecond();
-                time_t new_seconds = mktime(&tm);
-
-                //
-                // we only update seconds if the message arrived in the last half of a second,
-                // if its in the first half then its most likely delayed from the previous second.
-                time_t old_seconds = _seconds;
-                if (old_seconds != new_seconds)
-                {
-                    if (!_nmea_late)
-                    {
-                        _seconds = new_seconds;
-                        invalidate("seconds adjusted!");
-                        //dlog.info(TAG, F("adjusting seconds from %lu to %lu from:'%s'"), old_seconds, new_seconds, _nmea.getSentence());
-                    }
-                    else
-                    {
-                        //dlog.debug(TAG, F("ignoring late NMEA time: '%s'"),_nmea.getSentence());
-                    }
-                }
-
-                _nmea_late = false;
-                
-            }
-
-            if (_nmea.isValid() && _nmea.getNumSatellites() >= 4)
-            {
-                //
-                // if gps was not valid, it is now
-                //
-                if (!_gps_valid)
-                {
-                    _valid_delay = VALID_DELAY;
-                    _gps_valid       = true;
-                    //dlog.info(TAG, F("GPS valid!"));
-                }
-            }
-            else // nmea not valid or sat count < 4
-            {
-                if (_gps_valid || _valid_delay)
-                {
-                    invalidate("NMEA:%s SATS:%d from: '%s'",
-                            _nmea.isValid() ? "valid" : "invalid",
-                            _nmea.getNumSatellites(), _nmea.getSentence());
-                }
-            }
+    	 _buf[_buf_idx] = uart_getc(_uart);
+        if( _buf_idx > 1 && _buf[_buf_idx] == (char) '\n'){
+            break;
         }
+        _buf_idx++;
     }
-}
-*/
+    
+    if(_buf_idx > 1 && _buf[_buf_idx] == (char) '\n'){
+        //We have a full NMEA sentence to parse.
 
-void GPS::process(){
+        switch (minmea_sentence_id(_buf, false)) {
+            case MINMEA_SENTENCE_RMC: {
+                struct minmea_sentence_rmc frame;
+                if (minmea_parse_rmc(&frame, _buf)) {
+                    if(frame.valid){
+                        minmea_getdatetime(&_nmea_timestamp, &frame.date, &frame.time);
+                        _nmea_timestamp_us = time_us_64();
+                        _gps_valid = true;
+                        _valid = true;
+                        _valid_delay = VALID_DELAY; //TODO: wat is this?
+                        printf("Valid RMC | PPS -> NMEA delay: %" PRIu64 "uS\n", (_nmea_timestamp_us-_pps_timestamp_us));
+                    }
+                }
+            } break;
+
+            case MINMEA_SENTENCE_GGA: {
+                struct minmea_sentence_gga frame;
+                if (minmea_parse_gga(&frame, _buf)) {
+                    //printf("$GGA: fix quality: %d\n", frame.fix_quality);
+                }
+            } break;
+
+            case MINMEA_SENTENCE_GSV: {
+                struct minmea_sentence_gsv frame;
+                if (minmea_parse_gsv(&frame, _buf)) {
+                    //TODO: store satellite data somewhere so it can be plotted and we can confirm we are using enough
+                }
+            } break;
+        }
+
+        //printf("NMEA: %s\n", _buf);
+        //TODO: store last x epochs of NMEA strings?
+        memset(&_buf, 0x0, sizeof(_buf));
+        _buf_idx = 0;
+    }
 }
 
 void GPS::nmeaTimeout()
 {
-    _nmea_late = true;
+    //TODO: something
+    //_nmea_late = true;
 }
 
 
-/*
- * Mark as not valid
- */
 void /*__time_critical_func*/ GPS::timeout()
 {
-    if (_valid && time_us_64()-_last_pps_us < (VALID_TIMER_MS*1000))
+    if (_valid && time_us_64()-_pps_timestamp_us > (VALID_TIMER_MS*1000))
     {
         invalidate("timeout!");
     }
@@ -273,7 +253,8 @@ void /*__time_critical_func*/ GPS::pps()
 {
 
     uint32_t cur_micros = time_us_32();
-
+    _pps_timestamp_us = time_us_64();
+    
 #if 0
     //
     // don't trust PPS if GPS is not valid.

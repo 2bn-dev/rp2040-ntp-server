@@ -33,6 +33,7 @@
 #include "common.h"
 
 #define REASON_SIZE       128
+#define NMEA_BUF_SIZE     128
 #define NMEA_BUFFER_SIZE  250
 #define VALID_DELAY       120  // delay (seconds) from gps valid to valid
 #define VALID_TIMER_MS    1001 // if this timer expires we invalidate!
@@ -114,6 +115,15 @@ private:
     volatile bool     _valid;
     volatile bool     _nmea_late;
     char              _reason[REASON_SIZE];
+
+
+    char           _buf[NMEA_BUF_SIZE];
+    uint8_t           _buf_idx = 0;
+    struct tm           _nmea_timestamp;
+    uint64_t            _nmea_timestamp_us;
+    uint64_t            _pps_timestamp_us;
+
+
     void pps();        // interrupt handler
     void timeout();
     void invalidate(const char* fmt, ...);
