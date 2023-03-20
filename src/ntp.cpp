@@ -21,7 +21,6 @@
 
 #include <functional>
 #include <lwip/def.h> // htonl() & ntohl()
-#include "net.h"
 #include "ntp.h"
 
 static const char* TAG = "ntp";
@@ -76,12 +75,13 @@ typedef struct ntp_packet
 #define toEPOCH(t)      ((uint32_t)t-SEVENTY_YEARS)
 #define toNTP(t)        ((uint32_t)t+SEVENTY_YEARS)
 
-#ifdef NTP_PACKET_DEBUG
+#ifndef NTP_PACKET_DEBUG
 #include <time.h>
 char* timestr(long int t)
 {
     t = toEPOCH(t);
-    return ctime(&t);
+    time_t time = (time_t) t;
+    return ctime(&time);
 }
 
 void dumpNTPPacket(NTPPacket* ntp)
@@ -106,6 +106,8 @@ void dumpNTPPacket(NTPPacket* ntp)
 #define dumpNTPPacket(x)
 #endif
 
+static std::function<void()> _udp_cb;
+
 NTP::NTP(GPS& gps) :
     _gps(gps),
     _udp(),
@@ -122,6 +124,13 @@ NTP::~NTP()
 void NTP::begin()
 {
     _precision = computePrecision();
+    _udp = udp_new();
+
+
+
+    udp_bind(_udp, IP_ANY_TYPE, NTP_PORT);
+    udp_recv(_udp, &ntp_udp_recv_cb, this);
+    printf("[INFO] NTP::begin() complete, NTP bound to %d\n", NTP_PORT);
 }
 
 int8_t NTP::computePrecision()
@@ -136,7 +145,7 @@ int8_t NTP::computePrecision()
     double        total = (double)(end - start) / 1000000.0;
     double        time  = total / PRECISION_COUNT;
     double        prec  = log2(time);
-    //dlog.info(TAG, F("computePrecision: total:%f time:%f prec:%f (%d)"), total, time, prec, (int8_t)prec);
+    printf("INFO: computePrecision: total:%f time:%f prec:%f (%d)\n", total, time, prec, (int8_t)prec);
     return (int8_t)prec;
 }
 
@@ -150,25 +159,28 @@ void NTP::getNTPTime(NTPTime *time)
     time->fraction = (uint32_t)(percent * (double)4294967296L);
 }
 
-void NTP::process(netconn *conn, netbuf *buf)
+void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
-    ++_req_count;
+    printf("ntp_udp_recv_cb(%d)\n", p->tot_len);
+    NTP* that = (NTP*) arg;
+    ++that->_req_count;
     NTPPacket ntp;
     NTPTime   recv_time;
-    getNTPTime(&recv_time);
-    if (aup.length() != sizeof(NTPPacket))
+    that->getNTPTime(&recv_time);
+    if (p->tot_len != sizeof(NTPPacket))
     {
-        //dlog.warning(TAG, F("recievePacket: ignoring packet with bad length: %d < %d"), aup.length(), sizeof(NTPPacket));
+        printf("[WARNING] recievePacket: ignoring packet with bad length: %d < %d\n", p->tot_len, sizeof(NTPPacket));
         return;
     }
 
-    if (!_gps.isValid())
+    if (!that->_gps.isValid())
     {
         //dlog.warning(TAG, F("recievePacket: GPS data not valid!"));
-        return;
+        printf("[WARNING] receivePacket: GPS data not Valid!");
+        //return;
     }
 
-    memcpy(&ntp, aup.data(), sizeof(ntp));
+    memcpy(&ntp, p->payload, sizeof(ntp));
     ntp.delay              = ntohl(ntp.delay);
     ntp.dispersion         = ntohl(ntp.dispersion);
     ntp.orig_time.seconds  = ntohl(ntp.orig_time.seconds);
@@ -186,14 +198,14 @@ void NTP::process(netconn *conn, netbuf *buf)
     //
     ntp.flags      = setLI(LI_NONE) | setVERS(NTP_VERSION) | setMODE(MODE_SERVER);
     ntp.stratum    = 1;
-    ntp.precision  = _precision;
+    ntp.precision  = that->_precision;
     // TODO: compute actual root delay, and root dispersion
     ntp.delay = 1;      //(uint32)(0.000001 * 65536.0);
     ntp.dispersion = 1; //(uint32_t)(_gps.getDispersion() * 65536.0); // TODO: pre-calculate this?
     strncpy((char*)ntp.ref_id, REF_ID, sizeof(ntp.ref_id));
     ntp.orig_time  = ntp.xmit_time;
     ntp.recv_time  = recv_time;
-    getNTPTime(&(ntp.ref_time));
+    that->getNTPTime(&(ntp.ref_time));
     dumpNTPPacket(&ntp);
     ntp.delay              = htonl(ntp.delay);
     ntp.dispersion         = htonl(ntp.dispersion);
@@ -203,9 +215,9 @@ void NTP::process(netconn *conn, netbuf *buf)
     ntp.ref_time.fraction  = htonl(ntp.ref_time.fraction);
     ntp.recv_time.seconds  = htonl(ntp.recv_time.seconds);
     ntp.recv_time.fraction = htonl(ntp.recv_time.fraction);
-    getNTPTime(&(ntp.xmit_time));
+    that->getNTPTime(&(ntp.xmit_time));
     ntp.xmit_time.seconds  = htonl(ntp.xmit_time.seconds);
     ntp.xmit_time.fraction = htonl(ntp.xmit_time.fraction);
-    aup.write((uint8_t*)&ntp, sizeof(ntp));
-    ++_rsp_count;
+    //aup.write((uint8_t*)&ntp, sizeof(ntp));
+    ++that->_rsp_count;
 }
