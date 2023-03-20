@@ -16,7 +16,7 @@
 #define GPS_UART_BAUD   115200
 
 
-
+#define  PICO_STDIO_USB_ENABLE_RESET_VIA_BAUD_RATE 1
 
 
 
