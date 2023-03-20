@@ -20,6 +20,9 @@
  */
 
 #include <functional>
+#include <cstdarg>
+#include <stdio.h>
+#include <stdarg.h>
 #include "gps.h"
 
 
@@ -84,6 +87,11 @@ void GPS::begin()
     _invalidate = std::bind( &GPS::timeout, this);
     _nmea_timeout = std::bind( &GPS::nmeaTimeout, this);
 
+    //Configure GPS UART
+    gpio_set_function(PIN_GPS_TX, GPIO_FUNC_UART);
+    gpio_set_function(PIN_GPS_RX, GPIO_FUNC_UART);
+    uart_init(GPS_UART, GPS_UART_BAUD);
+
     add_repeating_timer_ms(VALID_TIMER_MS, &invalidate_callback, NULL, &_pps_timer);
     add_repeating_timer_ms(NMEA_TIMER_MS, &nmea_timeout_callback, NULL, &_nmea_timer);
 #ifdef FAMILY_ESP32
@@ -133,26 +141,26 @@ double GPS::getDispersion()
 {
     return us2s(MAX(MICROS_PER_SEC-_max_micros, MICROS_PER_SEC-_min_micros));
 }
-
+/*
 void GPS::process()
 {
     if (_reason[0] != '\0')
     {
-        dlog.warning(TAG, F("REASON: %s"), _reason);
+        //dlog.warning(TAG, F("REASON: %s"), _reason);
         _reason[0] = '\0';
     }
 
-    while (_stream.available() > 0)
+    while (uart_is_readable(_uart))
     {
-    	int c = _stream.read();
-    	dlog.trace(TAG, F("c: %c"), c);
-        if (_nmea.process(c))
+    	char c = uart_getc(_uart);
+    	//dlog.trace(TAG, F("c: %c"), c);
+        if (0)//_nmea.process(c))
         {
             struct timeval tv;
             getTime(&tv);
-            dlog.debug(TAG, F("'%s'"), _nmea.getSentence());
+            //dlog.debug(TAG, F("'%s'"), _nmea.getSentence());
 
-            const char * id = _nmea.getMessageID();
+            //const char * id = _nmea.getMessageID();
 
             //
             // if it was a RMC and its valid then check and maybe update the time
@@ -178,11 +186,11 @@ void GPS::process()
                     {
                         _seconds = new_seconds;
                         invalidate("seconds adjusted!");
-                        dlog.info(TAG, F("adjusting seconds from %lu to %lu from:'%s'"), old_seconds, new_seconds, _nmea.getSentence());
+                        //dlog.info(TAG, F("adjusting seconds from %lu to %lu from:'%s'"), old_seconds, new_seconds, _nmea.getSentence());
                     }
                     else
                     {
-                        dlog.debug(TAG, F("ignoring late NMEA time: '%s'"),_nmea.getSentence());
+                        //dlog.debug(TAG, F("ignoring late NMEA time: '%s'"),_nmea.getSentence());
                     }
                 }
 
@@ -199,10 +207,10 @@ void GPS::process()
                 {
                     _valid_delay = VALID_DELAY;
                     _gps_valid       = true;
-                    dlog.info(TAG, F("GPS valid!"));
+                    //dlog.info(TAG, F("GPS valid!"));
                 }
             }
-            else /* nmea not valid or sat count < 4 */
+            else // nmea not valid or sat count < 4
             {
                 if (_gps_valid || _valid_delay)
                 {
@@ -213,6 +221,10 @@ void GPS::process()
             }
         }
     }
+}
+*/
+
+void GPS::process(){
 }
 
 void GPS::nmeaTimeout()
