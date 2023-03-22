@@ -45,6 +45,7 @@ try changing the first byte of tud_network_mac_address[] below from 0x02 to 0x00
 
 #include "net.h"
 #include "netif/etharp.h"
+#include "pico/unique_id.h"
 
 // lwip context
 struct netif netif_data;
@@ -55,7 +56,7 @@ struct pbuf *received_frame = NULL;
 // this is used by this code, ./class/net/net_driver.c, and usb_descriptors.c
 // ideally speaking, this should be generated from the hardware's unique ID (if available)
 // it is suggested that the first byte is 0x02 to indicate a link-local address 
-const uint8_t tud_network_mac_address[6] = {0x02,0x02,0x84,0x6A,0x96,0x00};
+uint8_t tud_network_mac_address[6] = {0x00,0x00,0x00,0x00,0x00,0x00};
 
 // network parameters of this MCU 
 // --  should be overridden by DHCP  -- 
@@ -123,7 +124,12 @@ void init_lwip(void)
 
   //lwip_init();
 
-  // the lwip virtual MAC address must be different from the host's; to ensure this, we toggle the LSbit
+  // the lwip virtual MAC address must be different from the host's; to ensure this, we toggle the LSbita
+  pico_unique_board_id_t flash_id;
+  pico_get_unique_board_id(&flash_id);
+  memcpy(tud_network_mac_address, &flash_id, sizeof(tud_network_mac_address)); //flash ID is 64 bits/8 bytes, MAC is 48 bits / 6 bytes
+  tud_network_mac_address[0] |= 0x40; //set the second bit in the mac to 0x1 make this a "locally administered" address
+
   netif->hwaddr_len = sizeof(tud_network_mac_address);
   memcpy(netif->hwaddr, tud_network_mac_address, sizeof(tud_network_mac_address));
   netif->hwaddr[5] ^= 0x01;

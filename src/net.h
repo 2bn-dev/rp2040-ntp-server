@@ -52,7 +52,7 @@ extern struct pbuf *received_frame;
 // this is used by this code, ./class/net/net_driver.c, and usb_descriptors.c
 // ideally speaking, this should be generated from the hardware's unique ID (if available)
 // it is suggested that the first byte is 0x02 to indicate a link-local address 
-extern const uint8_t tud_network_mac_address[6];
+extern uint8_t tud_network_mac_address[6];
 
 // network parameters of this MCU 
 // --  should be overridden by DHCP  -- 
