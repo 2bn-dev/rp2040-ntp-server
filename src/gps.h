@@ -65,6 +65,14 @@
 #define PPS_TIMING_PIN_OFF()
 #endif
 
+#define MT_SET_SPEED  "$PMTK251,115200*1F\r\n"
+#define MT_SET_SPEED_ALT "$PGCMD,232,6*58\r\n" // Requires cold restart :|
+#define MT_FULL_COLD_START "$PMTK104*37\r\n"  
+#define MT_SET_TIMING_PRODUCT "$PMTK256,1*2E\r\n" //Configure GNSS Timing product to enhance 1PPS output timing accuracy.
+#define MT_SET_PPS_NMEA "$PMTK255,1*2D\r\n" //Enable "fixed" PPS -> NMEA output period
+
+#define UBX_SET_SPEED "$PUBX,41,1,0023,0003,115200,0*1E\r\n"
+
 
 static bool __time_critical_func(invalidate_callback)(struct repeating_timer *t);
 static bool __time_critical_func(nmea_timeout_callback)(struct repeating_timer *t);
@@ -128,6 +136,8 @@ private:
     void timeout();
     void invalidate(const char* fmt, ...);
     void nmeaTimeout();
+    void configure_mtk();
+    void configure_ubx();
 };
 
 #endif /* GPS_H_ */

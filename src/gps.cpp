@@ -34,6 +34,9 @@ static std::function<void()> _pps;
 static std::function<void()> _invalidate;
 static std::function<void()> _nmea_timeout;
 
+const uint8_t mt_set_speed[] = MT_SET_SPEED;
+const uint8_t mt_set_timing_product[] = MT_SET_TIMING_PRODUCT;
+const uint8_t mt_set_pps_nmea[] = MT_SET_PPS_NMEA;
 
 static __isr void _pps_isr(unsigned int gpio, long unsigned int mask)
 {
@@ -96,8 +99,26 @@ void GPS::begin()
     //Configure GPS UART
     gpio_set_function(PIN_GPS_TX, GPIO_FUNC_UART);
     gpio_set_function(PIN_GPS_RX, GPIO_FUNC_UART);
-    uart_init(GPS_UART, GPS_UART_BAUD);
 
+    uart_init(GPS_UART, 9600);
+    uart_set_translate_crlf(GPS_UART, 0);
+
+    sleep_ms(50);
+    configure_mtk();
+    configure_ubx();
+
+    //Only if 9600 baud, that way we don't need to coldstart every time.
+    uart_write_blocking(GPS_UART, (uint8_t *) MT_SET_SPEED_ALT, strlen(MT_SET_SPEED_ALT));
+    uart_tx_wait_blocking(GPS_UART);
+    uart_write_blocking(GPS_UART, (uint8_t *) MT_FULL_COLD_START, strlen(MT_FULL_COLD_START));
+    uart_tx_wait_blocking(GPS_UART);
+
+    uart_set_baudrate(GPS_UART, GPS_UART_BAUD);
+    sleep_ms(50);
+    configure_mtk();
+    configure_ubx();
+
+    
     add_repeating_timer_ms(VALID_TIMER_MS, &invalidate_callback, NULL, &_pps_timer);
     add_repeating_timer_ms(NMEA_TIMER_MS, &nmea_timeout_callback, NULL, &_nmea_timer);
 #ifdef FAMILY_ESP32
@@ -112,6 +133,30 @@ void GPS::begin()
     //gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, true);
     //irq_set_enabled(IO_IRQ_BANK0, true); 
 #endif
+}
+void GPS::configure_mtk(){
+    uart_write_blocking(GPS_UART, mt_set_timing_product, strlen(MT_SET_TIMING_PRODUCT));
+    uart_tx_wait_blocking(GPS_UART);
+    while(uart_is_readable(GPS_UART))
+        uart_getc(GPS_UART);
+
+    uart_write_blocking(GPS_UART, mt_set_pps_nmea, strlen(MT_SET_PPS_NMEA));
+    uart_tx_wait_blocking(GPS_UART);
+    while(uart_is_readable(GPS_UART))
+        uart_getc(GPS_UART);
+
+    uart_write_blocking(GPS_UART, mt_set_speed, strlen(MT_SET_SPEED));
+    uart_tx_wait_blocking(GPS_UART);
+    while(uart_is_readable(GPS_UART))
+        uart_getc(GPS_UART);
+}
+
+void GPS::configure_ubx(){
+    uart_write_blocking(GPS_UART, (uint8_t *) UBX_SET_SPEED, strlen(UBX_SET_SPEED));
+    uart_tx_wait_blocking(GPS_UART);
+    while(uart_is_readable(GPS_UART))
+        uart_getc(GPS_UART);
+
 }
 
 void GPS::end()
@@ -202,7 +247,9 @@ void GPS::process()
             } break;
         }
 
-        //printf("NMEA: %s\n", _buf);
+#ifdef NMEA_DEBUG
+        printf("NMEA: %s", _buf);
+#endif
         //TODO: store last x epochs of NMEA strings?
         memset(&_buf, 0x0, sizeof(_buf));
         _buf_idx = 0;
