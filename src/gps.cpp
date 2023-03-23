@@ -178,11 +178,15 @@ void GPS::getTime(struct timeval* tv)
     uint64_t cur_micros  = time_us_64();
     tv->tv_sec  = mktime(&_nmea_timestamp);
     tv->tv_usec = (uint32_t)(cur_micros - _pps_timestamp_us);
+    
+    //If the pps timestamp is newer than the nmea timestamp the pps pulse has so we are 1 second later 
+    if(_pps_timestamp_us > _nmea_timestamp_us){
+        tv->tv_sec += 1;
+    }
 
-    //
-    // if micros_delta is at or bigger than one second then
-    // use the max just under 1 second.
-    //
+
+    // if micros_delta is at or bigger than one second then use the max just under 1 second.
+    // TODO: does this make sense?
     if (tv->tv_usec >= 1000000 || tv->tv_usec < 0)
     {
         printf("[WARNING] GPS::getTime() tv_usec too large/small?\n");
