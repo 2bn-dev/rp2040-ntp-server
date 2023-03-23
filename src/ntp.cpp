@@ -61,7 +61,7 @@ typedef struct ntp_packet
 
 #define NTP_VERSION     4
 
-#define REF_ID          "PPS "  // "GPS " when we have one!
+#define REF_ID          "GPS "
 
 #define setLI(value)    ((value&0x03)<<6)
 #define setVERS(value)  ((value&0x07)<<3)
@@ -152,7 +152,8 @@ int8_t NTP::computePrecision()
 void NTP::getNTPTime(NTPTime *time)
 {
     struct timeval tv;
-    _gps.getTime(&tv);
+    bool status = _gps.getTime(&tv);
+    //TODO: if status == false we should not use this timestamp.
     time->seconds = toNTP(tv.tv_sec);
 
     double percent = us2s(tv.tv_usec);
@@ -175,9 +176,8 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
 
     if (!that->_gps.isValid())
     {
-        //dlog.warning(TAG, F("recievePacket: GPS data not valid!"));
         printf("[WARNING] receivePacket: GPS data not Valid!");
-        //return;
+        return;
     }
 
     memcpy(&ntp, p->payload, sizeof(ntp));
@@ -193,9 +193,8 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
     ntp.xmit_time.fraction = ntohl(ntp.xmit_time.fraction);
     dumpNTPPacket(&ntp);
 
-    //
+
     // Build the response
-    //
     ntp.flags      = setLI(LI_NONE) | setVERS(NTP_VERSION) | setMODE(MODE_SERVER);
     ntp.stratum    = 1;
     ntp.precision  = that->_precision;
@@ -220,7 +219,6 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
     that->getNTPTime(&(ntp.xmit_time));
     ntp.xmit_time.seconds  = htonl(ntp.xmit_time.seconds);
     ntp.xmit_time.fraction = htonl(ntp.xmit_time.fraction);
-    //aup.write((uint8_t*)&ntp, sizeof(ntp));
 
     struct pbuf *p_out;
     p_out = pbuf_alloc(PBUF_TRANSPORT, sizeof(ntp), PBUF_RAM);

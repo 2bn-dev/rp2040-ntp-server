@@ -31,8 +31,6 @@
 static const char* TAG = "gps";
 
 static std::function<void()> _pps;
-static std::function<void()> _invalidate;
-static std::function<void()> _nmea_timeout;
 
 const uint8_t mt_set_speed[] = MT_SET_SPEED;
 const uint8_t mt_set_timing_product[] = MT_SET_TIMING_PRODUCT;
@@ -45,38 +43,15 @@ static __isr void _pps_isr(unsigned int gpio, long unsigned int mask)
     }
 }
 
-static bool invalidate_callback(struct repeating_timer *t){
-    if (_invalidate){
-        _invalidate();
-    }    
-
-    return true;
-}
-
-static bool nmea_timeout_callback(struct repeating_timer *t){
-    if (_nmea_timeout){
-        _nmea_timeout();
-    }
-
-    return true;
-}
-
-
 GPS::GPS() :
     _uart(GPS_UART),
-    _pps_timer(),
-    _seconds(0),
-    _valid_delay(0),
     _valid_count(0),
     _min_micros(0),
     _max_micros(0),
     _last_micros(0),
     _timeouts(0),
-    _pps_pin(PIN_PPS),
-    _gps_valid(false),
     _valid(false),
-    _nmea_late(false),
-    _nmea_timestamp_us(time_us_64()),
+    _nmea_timestamp_us(0),
     _pps_timestamp_us(0)
 {
     _reason[0] = '\0';
@@ -91,10 +66,7 @@ GPS::~GPS()
 
 void GPS::begin()
 {
-    PPS_TIMIMG_PIN_INIT();
     _pps = std::bind( &GPS::pps, this);
-    _invalidate = std::bind( &GPS::timeout, this);
-    _nmea_timeout = std::bind( &GPS::nmeaTimeout, this);
 
     //Configure GPS UART
     gpio_set_function(PIN_GPS_TX, GPIO_FUNC_UART);
@@ -119,18 +91,16 @@ void GPS::begin()
     configure_ubx();
 
     
-    add_repeating_timer_ms(VALID_TIMER_MS, &invalidate_callback, NULL, &_pps_timer);
-    add_repeating_timer_ms(NMEA_TIMER_MS, &nmea_timeout_callback, NULL, &_nmea_timer);
 #ifdef FAMILY_ESP32
     
-    pinMode(_pps_pin, INPUT);
-    attachInterrupt(_pps_pin, _pps_isr, RISING);
+    pinMode(PIN_PPS, INPUT);
+    attachInterrupt(PIN_PPS, _pps_isr, RISING);
 #endif
 #ifdef FAMILY_RP2040
-    gpio_set_dir(_pps_pin, false);
-    gpio_set_irq_enabled_with_callback(_pps_pin, GPIO_IRQ_EDGE_RISE, true, _pps_isr);
+    gpio_set_dir(PIN_PPS, false);
+    gpio_set_irq_enabled_with_callback(PIN_PPS, GPIO_IRQ_EDGE_RISE, true, _pps_isr);
     //irq_set_exclusive_handler(IO_IRQ_BANK0, _pps_isr);
-    //gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, true);
+    //gpio_set_irq_enabled(PIN_PPS, GPIO_IRQ_EDGE_RISE, true);
     //irq_set_enabled(IO_IRQ_BANK0, true); 
 #endif
 }
@@ -161,21 +131,23 @@ void GPS::configure_ubx(){
 
 void GPS::end()
 {
-    cancel_repeating_timer(&_pps_timer);
 #ifdef FAMILY_ESP32
-    detachInterrupt(_pps_pin);
+    detachInterrupt(PIN_PPS);
 #endif
 #ifdef FAMILY_RP2040
-    //irq_remove_handler(_pps_pin, _pps_isr);
-    //gpio_set_irq_enabled(_pps_pin, GPIO_IRQ_EDGE_RISE, false);
+    //irq_remove_handler(PIN_PPS, _pps_isr);
+    //gpio_set_irq_enabled(PIN_PPS, GPIO_IRQ_EDGE_RISE, false);
     //irq_set_enabled(IO_IRQ_BANK0, false);
 #endif
     _pps = nullptr;
 }
 
-void GPS::getTime(struct timeval* tv)
-{
+bool GPS::getTime(struct timeval* tv){
     uint64_t cur_micros  = time_us_64();
+
+    if(!_valid)
+        return false;
+
     tv->tv_sec  = mktime(&_nmea_timestamp);
     tv->tv_usec = (uint32_t)(cur_micros - _pps_timestamp_us);
     
@@ -187,11 +159,12 @@ void GPS::getTime(struct timeval* tv)
 
     // if micros_delta is at or bigger than one second then use the max just under 1 second.
     // TODO: does this make sense?
-    if (tv->tv_usec >= 1000000 || tv->tv_usec < 0)
-    {
+    if (tv->tv_usec >= 1000000 || tv->tv_usec < 0){
         printf("[WARNING] GPS::getTime() tv_usec too large/small?\n");
         tv->tv_usec = 999999;
     }
+
+    return true;
 }
 
 double GPS::getDispersion()
@@ -201,13 +174,22 @@ double GPS::getDispersion()
 
 void GPS::process()
 {
+    uint64_t process_time = time_us_64();
+
+    if (_valid && process_time-_pps_timestamp_us > (PPS_VALID_TIME_MS*1000)){
+        invalidate("PPS timeout!");
+    }
+
+    if (_valid && process_time-_nmea_timestamp_us > (NMEA_VALID_TIME_MS*1000)){
+        invalidate("NMEA timeout!");
+    }
+
     if (_reason[0] != '\0')
     {
         printf("[WARNING] REASON: %s\n", _reason);
         _reason[0] = '\0';
     }
 
-    //memset(&_buf, 0x0, sizeof(_buf));
 
     while (uart_is_readable(_uart))
     {
@@ -228,9 +210,9 @@ void GPS::process()
                     if(frame.valid){
                         minmea_getdatetime(&_nmea_timestamp, &frame.date, &frame.time);
                         _nmea_timestamp_us = time_us_64();
-                        _gps_valid = true;
+
                         _valid = true;
-                        _valid_delay = VALID_DELAY; //TODO: wat is this?
+
                         printf("Valid RMC | PPS -> NMEA delay: %" PRIu64 "uS\n", (_nmea_timestamp_us-_pps_timestamp_us));
                     }
                 }
@@ -260,29 +242,10 @@ void GPS::process()
     }
 }
 
-void GPS::nmeaTimeout()
-{
-    //TODO: something
-    //_nmea_late = true;
-}
-
-
-void /*__time_critical_func*/ GPS::timeout()
-{
-    if (_valid && time_us_64()-_pps_timestamp_us > (VALID_TIMER_MS*1000))
-    {
-        invalidate("timeout!");
-    }
-}
-
-/*
- * Mark as not valid
- */
+// Mark as not valid
 void /*__time_critical_func*/ GPS::invalidate(const char* fmt, ...)
 {
-    //
     // only update the reason if there is not one already
-    //
     if (_reason[0] == '\0')
     {
         va_list ap;
@@ -292,57 +255,18 @@ void /*__time_critical_func*/ GPS::invalidate(const char* fmt, ...)
         va_end(ap);
     }
     _valid       = false;
-    _gps_valid   = false;
-    _valid_delay = 0;
     _last_micros = 0;
 }
 
-/*
- * Interrupt handler for a PPS (Pulse Per Second) signal from GPS module.
- */
-void /*__time_critical_func*/ GPS::pps()
-{
+// Interrupt handler for a PPS (Pulse Per Second) signal from GPS module.
+void /*__time_critical_func*/ GPS::pps(){
 
     uint32_t cur_micros = time_us_32();
     _pps_timestamp_us = time_us_64();
     
-#if 0
-    //
-    // don't trust PPS if GPS is not valid.
-    //
-    if (!_gps_valid)
-    {
-        PPS_TIMING_PIN_OFF();
-        return;
-    }
-#endif
-
-    //
-    // increment seconds
-    //
-    _seconds += 1;
 
 
-    //
-    // if we are still counting down then keep waiting
-    //
-    if (_valid_delay)
-    {
-        --_valid_delay;
-        if (_valid_delay == 0)
-        {
-            // clear stats and mark us valid
-            _min_micros  = 0;
-            _max_micros  = 0;
-            _valid       = true;
-            _valid_since = _seconds;
-            ++_valid_count;
-        }
-    }
-
-    //
     // the first time around we just initialize the last value
-    //
     if (_last_micros == 0)
     {
         _last_micros = cur_micros;
