@@ -12,6 +12,7 @@ add_executable(rp2040-ntp-server
     ${CMAKE_CURRENT_LIST_DIR}/src/net.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/ntp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/gps.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/ref_clock.cpp
 
 )
 

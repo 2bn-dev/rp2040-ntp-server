@@ -36,7 +36,7 @@ const uint8_t mt_set_speed[] = MT_SET_SPEED;
 const uint8_t mt_set_timing_product[] = MT_SET_TIMING_PRODUCT;
 const uint8_t mt_set_pps_nmea[] = MT_SET_PPS_NMEA;
 
-static __isr void _pps_isr(unsigned int gpio, long unsigned int mask)
+static __isr void __time_critical_func(_pps_isr)(unsigned int gpio, long unsigned int mask)
 {
     if (_pps){
         _pps();
@@ -72,7 +72,7 @@ void GPS::begin()
     gpio_set_function(PIN_GPS_TX, GPIO_FUNC_UART);
     gpio_set_function(PIN_GPS_RX, GPIO_FUNC_UART);
 
-    uart_init(GPS_UART, 9600);
+    uart_init(GPS_UART, GPS_UART_INITIAL_BAUD);
     uart_set_translate_crlf(GPS_UART, 0);
 
     sleep_ms(50);
@@ -142,6 +142,23 @@ void GPS::end()
     _pps = nullptr;
 }
 
+char* GPS::time_to_str(const struct tm *t){
+    static char result[26];
+
+    sprintf(result, "%d/%.2d/%.2d %.2d:%.2d:%.2d.%d",
+        1900 + t->tm_year,
+        t->tm_mon,
+        t->tm_mday, 
+        t->tm_hour,
+        t->tm_min, 
+        t->tm_sec,
+        (time_us_64()-_pps_timestamp_us)
+    );
+
+    return result;
+
+}
+
 bool GPS::getTime(struct timeval* tv){
     uint64_t cur_micros  = time_us_64();
 
@@ -152,14 +169,28 @@ bool GPS::getTime(struct timeval* tv){
     tv->tv_usec = (uint32_t)(cur_micros - _pps_timestamp_us);
     
     //If the pps timestamp is newer than the nmea timestamp the pps pulse has so we are 1 second later 
+    
     if(_pps_timestamp_us > _nmea_timestamp_us){
-        tv->tv_sec += 1;
+        //moved to pps isr
+        //tv->tv_sec += 1;
+    }else{
+        uint64_t us_since_nmea_lock = cur_micros-_nmea_timestamp_us;
+        uint64_t seconds_since_nmea_lock = us_since_nmea_lock / US_PER_SEC;
+
+        uint64_t us_since_pps_lock = cur_micros-_pps_timestamp_us;
+        uint64_t seconds_since_pps_lock = us_since_pps_lock / US_PER_SEC;
+        uint64_t us_remainder_since_pps_lock = us_since_pps_lock - (seconds_since_pps_lock*US_PER_SEC);
+    
+    
+        tv->tv_sec += seconds_since_nmea_lock;
+        // and since the second happens precisely every second, the latest remainder should be the most accurate info we have?
+        tv->tv_usec = us_remainder_since_pps_lock;
     }
 
-
+    //printf("getTime DBG: %lu %lu %lu %lu\n", tv->tv_sec, tv->tv_usec);
     // if micros_delta is at or bigger than one second then use the max just under 1 second.
     // TODO: does this make sense?
-    if (tv->tv_usec >= 1000000 || tv->tv_usec < 0){
+    if (tv->tv_usec >= US_PER_SEC || tv->tv_usec < 0){
         printf("[WARNING] GPS::getTime() tv_usec too large/small?\n");
         tv->tv_usec = 999999;
     }
@@ -176,12 +207,12 @@ void GPS::process()
 {
     uint64_t process_time = time_us_64();
 
-    if (_valid && process_time-_pps_timestamp_us > (PPS_VALID_TIME_MS*1000)){
-        invalidate("PPS timeout!");
+    if (_valid && process_time-_pps_timestamp_us > (PPS_VALID_TIME_MS*US_PER_MS)){
+        //invalidate("PPS timeout!");
     }
 
-    if (_valid && process_time-_nmea_timestamp_us > (NMEA_VALID_TIME_MS*1000)){
-        invalidate("NMEA timeout!");
+    if (_valid && process_time-_nmea_timestamp_us > (NMEA_VALID_TIME_MS*US_PER_MS)){
+        //invalidate("NMEA timeout!");
     }
 
     if (_reason[0] != '\0')
@@ -213,7 +244,7 @@ void GPS::process()
 
                         _valid = true;
 
-                        printf("Valid RMC | PPS -> NMEA delay: %" PRIu64 "uS\n", (_nmea_timestamp_us-_pps_timestamp_us));
+                        printf("VALID | %s | PPS (%" PRIu64 " uS), PPStoNMEA (%" PRIu64 " uS)\n", time_to_str(&_nmea_timestamp), (_pps_timestamp_us-_pps_timestamp_us_prev), (_nmea_timestamp_us-_pps_timestamp_us));
                     }
                 }
             } break;
@@ -234,7 +265,7 @@ void GPS::process()
         }
 
 #ifdef NMEA_DEBUG
-        printf("NMEA: %s", _buf);
+        printf("NMEA_DEBUG: %s", _buf);
 #endif
         //TODO: store last x epochs of NMEA strings?
         memset(&_buf, 0x0, sizeof(_buf));
@@ -243,7 +274,7 @@ void GPS::process()
 }
 
 // Mark as not valid
-void /*__time_critical_func*/ GPS::invalidate(const char* fmt, ...)
+void __time_critical_func(GPS::invalidate)(const char* fmt, ...)
 {
     // only update the reason if there is not one already
     if (_reason[0] == '\0')
@@ -259,31 +290,24 @@ void /*__time_critical_func*/ GPS::invalidate(const char* fmt, ...)
 }
 
 // Interrupt handler for a PPS (Pulse Per Second) signal from GPS module.
-void /*__time_critical_func*/ GPS::pps(){
-
+void __time_critical_func(GPS::pps)(){
+    uint64_t _ts_us = time_us_64();
     uint32_t cur_micros = time_us_32();
-    _pps_timestamp_us = time_us_64();
-    
 
+    _pps_timestamp_us_prev = _pps_timestamp_us;
+    _pps_timestamp_us = _ts_us;
+    uint64_t us_elapsed = _ts_us-_pps_timestamp_us_prev;
 
-    // the first time around we just initialize the last value
-    if (_last_micros == 0)
-    {
-        _last_micros = cur_micros;
-        return;
-    }
+    _nmea_timestamp.tm_sec += 1;
 
-    uint32_t micros_count = cur_micros - _last_micros;
-    _last_micros           = cur_micros;
+    if(us_elapsed > PPS_VALID_TIME_MS*US_PER_MS)
+        return;    
 
-    if (_min_micros == 0 || micros_count < _min_micros)
-    {
-        _min_micros = micros_count;
-    }
+    if (_min_micros == 0 || us_elapsed < _min_micros)
+        _min_micros = us_elapsed;
 
-    if (micros_count > _max_micros)
-    {
-        _max_micros = micros_count;
-    }
+    if (us_elapsed > _max_micros)
+        _max_micros = us_elapsed;
+
 }
 

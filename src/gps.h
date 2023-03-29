@@ -38,7 +38,11 @@
 #define PPS_VALID_TIME_MS       1001 // period from previous PPS pulse, if exceeded, timestamp no longer considered valid
 #define NMEA_VALID_TIME_MS      1100 // period from previous NMEA RMC, if exceeded, timestamp no longer considered valid
 
-#define MICROS_PER_SEC         1000000
+#define MICROS_PER_SEC          1000000
+#define US_PER_SEC              1000000
+#define US_PER_MS               1000
+#define MS_PER_SEC              1000
+
 
 #define us2s(x) (((double)x)/(double)MICROS_PER_SEC) // microseconds to seconds
 
@@ -91,14 +95,16 @@ private:
 
     uint8_t           _buf_idx = 0;
     struct tm         _nmea_timestamp;
-    uint64_t          _nmea_timestamp_us;
-    uint64_t          _pps_timestamp_us;
+    volatile uint64_t          _nmea_timestamp_us;
+    volatile uint64_t          _pps_timestamp_us;
+    volatile uint64_t          _pps_timestamp_us_prev;
 
 
     void pps();        // interrupt handler
     void invalidate(const char* fmt, ...);
     void configure_mtk();
     void configure_ubx();
+    char* time_to_str(const struct tm *t);
 };
 
 #endif /* GPS_H_ */
