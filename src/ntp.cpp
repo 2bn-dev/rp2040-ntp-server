@@ -75,7 +75,7 @@ typedef struct ntp_packet
 #define toEPOCH(t)      ((uint32_t)t-SEVENTY_YEARS)
 #define toNTP(t)        ((uint32_t)t+SEVENTY_YEARS)
 
-#ifndef NTP_PACKET_DEBUG
+#ifdef NTP_PACKET_DEBUG
 #include <time.h>
 char* timestr(long int t)
 {
@@ -201,8 +201,8 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
 
     // TODO: compute actual root delay, and root dispersion
 
-    ntp.delay = 1;      //(uint32)(0.000001 * 65536.0);
-    ntp.dispersion = 1; //(uint32_t)(_gps.getDispersion() * 65536.0); // TODO: pre-calculate this?
+    ntp.delay = 0;      //(uint32)(0.000001 * 65536.0);
+    ntp.dispersion = 0; //(uint32_t)(_gps.getDispersion() * 65536.0); // TODO: pre-calculate this?
     strncpy((char*)ntp.ref_id, REF_ID, sizeof(ntp.ref_id));
     ntp.orig_time  = ntp.xmit_time;
     ntp.recv_time  = recv_time;
@@ -230,6 +230,7 @@ void ntp_udp_recv_cb(void* arg, struct udp_pcb *pcb, struct pbuf *p, const ip_ad
     udp_sendto(pcb, p_out, addr, port);
     pbuf_free(p_out);
     pbuf_free(p);
+    tud_task();
     
     ++that->_rsp_count;
 }
