@@ -10,8 +10,10 @@ The rp2040 presents a USB NIC to the host PC, then the host PC bridges that nic 
 
 Intended to be (potentially) usable with:
 
- * a GPS with 1PPS output
+ * (implemented) a GPS with 1PPS output
+ * (implemented) a 10 Mhz reference clock
  * Everset ES100 WWVB BPSK receiver
+ * WWVB via ADC?
  * CMAX Timing CME6005 modules (cheap WWVB AM receivers)
  * LTE/5g? provided clock
  * ATSC? provided clock (don't know if this is accurate enough or feasibly captured)
